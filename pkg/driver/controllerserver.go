@@ -105,27 +105,40 @@ func (cs *controllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 		return nil, fmt.Errorf("failed to check if bucket %s exists: %v", volumeID, err)
 	}
 
-	if exists {
-		// get meta, ignore errors as it could just mean meta does not exist yet
-		m, err := client.GetFSMeta(bucketName, prefix)
-		if err == nil {
-			// Check if volume capacity requested is bigger than the already existing capacity
-			if capacityBytes > m.CapacityBytes {
-				return nil, status.Error(
-					codes.AlreadyExists, fmt.Sprintf("Volume with the same name: %s but with smaller size already exist", volumeID),
-				)
-			}
-		}
-	} else {
+	// 删除不允许重复挂载同一个minio 目录导致的问题
+	// 一切以实际minio 目录大小挂载(业务端先需要获取目标路径的大小再传入到pvc创建中)
+	if !exists {
 		if err = client.CreateBucket(bucketName); err != nil {
 			return nil, fmt.Errorf("failed to create bucket %s: %v", bucketName, err)
 		}
 	}
 
-	if err = client.CreatePrefix(bucketName, path.Join(prefix, defaultFsPath)); err != nil && prefix != "" {
-		return nil, fmt.Errorf("failed to create prefix %s: %v", path.Join(prefix, defaultFsPath), err)
-	}
+	/*
+		if exists {
+			// get meta, ignore errors as it could just mean meta does not exist yet
+			m, err := client.GetFSMeta(bucketName, prefix)
+			if err == nil {
+				// Check if volume capacity requested is bigger than the already existing capacity
+				if capacityBytes > m.CapacityBytes {
+					return nil, status.Error(
+						codes.AlreadyExists, fmt.Sprintf("Volume with the same name: %s but with smaller size already exist", volumeID),
+					)
+				}
+			}
+			glog.V(4).Infof("bucket path %s  already exist, ready to reset .metadata.json", volumeID)
+		} else {
+			if err = client.CreateBucket(bucketName); err != nil {
+				return nil, fmt.Errorf("failed to create bucket %s: %v", bucketName, err)
+			}
+		}
+	*/
 
+	if !exists {
+		if err = client.CreatePrefix(bucketName, path.Join(prefix, defaultFsPath)); err != nil && prefix != "" {
+			return nil, fmt.Errorf("failed to create prefix %s: %v", path.Join(prefix, defaultFsPath), err)
+		}
+	}
+	
 	if err := client.SetFSMeta(meta); err != nil {
 		return nil, fmt.Errorf("error setting bucket metadata: %w", err)
 	}
